@@ -45,7 +45,9 @@ app.use(express.json()); //convert json to js obj and store in req.body
 
 app.use(cookieParser()); //parse cookie and store in req.cookie
 
-
+app.get('/', (req, res) => {
+  res.status(200).json({ message: 'URL Shortener API is running successfully!' });
+});
 
 app.use("/api/v1", userRoutes);
 
