@@ -15,8 +15,8 @@
 </p>
 
 <p>
-  <a href="https://YOUR-LIVE-API-URL">Live API</a> ·
-  <a href="https://YOUR-POSTMAN-COLLECTION-URL">Postman Collection</a>
+  <a href="https://url-shortner-s297.onrender.com/api/v1">Live API</a> ·
+  <a href="https://documenter.getpostman.com/view/39798617/2sBYHPz29v">Postman Collection</a>
 </p>
 
 </div>
