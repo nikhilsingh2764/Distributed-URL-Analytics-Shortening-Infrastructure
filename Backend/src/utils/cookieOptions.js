@@ -1,12 +1,16 @@
 import env from "../config/env.js";
 
-const secure = env.isProduction || env.COOKIE_SECURE || env.COOKIE_SAME_SITE === "none";
+// When sameSite is "none", secure MUST be true, and domain must be omitted for cross-site cookies.
+const isSameSiteNone = env.COOKIE_SAME_SITE === "none" || env.COOKIE_SAME_SITE === "None";
+const secure = env.isProduction || env.COOKIE_SECURE || isSameSiteNone;
 
 const base = {
     httpOnly: true,
-    secure,
-    sameSite: env.COOKIE_SAME_SITE,
-    domain: env.COOKIE_DOMAIN || undefined,
+    secure: secure,
+    sameSite: env.COOKIE_SAME_SITE || "lax",
+    // CRITICAL: Do NOT set domain if your frontend and backend are on different domains (e.g. Vercel -> Render)
+    // Only include domain if you are on subdomains of the same root domain (e.g. api.mydomain.com and app.mydomain.com)
+    ...(env.COOKIE_DOMAIN && { domain: env.COOKIE_DOMAIN }),
 };
 
 const accessCookie = { ...base, path: "/" };
