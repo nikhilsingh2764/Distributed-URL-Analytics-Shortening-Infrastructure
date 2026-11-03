@@ -1,3 +1,73 @@
+@import "@fontsource-variable/bricolage-grotesque/index.css";
+@import "@fontsource-variable/instrument-sans/index.css";
+@import "@fontsource-variable/jetbrains-mono/index.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Colour tokens are RGB triplets so Tailwind can apply opacity (bg-primary/10). */
+:root {
+  --c-bg: 243 245 247;
+  --c-surface: 255 255 255;
+  --c-sunken: 235 239 243;
+  --c-ink: 16 24 40;
+  --c-muted: 91 102 120;
+  --c-line: 221 226 234;
+  --c-primary: 11 110 110;
+  --c-primary-ink: 255 255 255;
+  --c-primary-soft: 221 241 239;
+  --c-accent: 242 176 30;
+  --c-danger: 200 55 45;
+  --c-danger-soft: 252 233 231;
+  --c-success: 22 133 90;
+  color-scheme: light;
+}
+
+.dark {
+  --c-bg: 11 18 21;
+  --c-surface: 17 27 31;
+  --c-sunken: 22 35 40;
+  --c-ink: 232 238 240;
+  --c-muted: 140 155 163;
+  --c-line: 36 52 59;
+  --c-primary: 60 200 180;
+  --c-primary-ink: 6 30 28;
+  --c-primary-soft: 18 48 47;
+  --c-accent: 242 176 30;
+  --c-danger: 240 110 100;
+  --c-danger-soft: 58 28 28;
+  --c-success: 72 200 140;
+  color-scheme: dark;
+}
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    @apply bg-bg font-sans text-ink antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+  h1, h2, h3 { @apply font-display tracking-tight; }
+  :focus-visible { @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-bg; }
+  ::selection { background: rgb(var(--c-primary) / 0.25); }
+  button { @apply cursor-pointer disabled:cursor-not-allowed; }
+}
+
+@layer components {
+  .field-input {
+    @apply w-full rounded-lg border border-line bg-surface px-3.5 py-2.5 text-[15px] text-ink placeholder:text-muted/70
+      transition-colors hover:border-muted/50 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25;
+  }
+  .link-code { @apply font-mono text-[13.5px] tracking-tight; }
+}
+
+/* The one hero moment: a long URL being trimmed. Disabled for reduced motion. */
+@keyframes caret { 50% { opacity: 0; } }
+.caret::after { content: ""; display: inline-block; width: 2px; height: 1.1em; margin-left: 2px; vertical-align: -0.15em; background: rgb(var(--c-primary)); animation: caret 1s steps(1) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+}
+
+.skeleton { position: relative; overflow: hidden; @apply rounded-md bg-sunken; }
+.skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgb(var(--c-surface) / .6), transparent); animation: shimmer 1.3s infinite; }

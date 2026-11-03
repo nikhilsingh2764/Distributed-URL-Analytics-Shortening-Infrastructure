@@ -1,45 +1,22 @@
 import RefreshToken from "../../model/authModel/refreshToken.model.js";
 
-
 class RefreshTokenRepository {
-
-
-    async create(data){
-
-        return await RefreshToken.create(data);
-
+    create(data) {
+        return RefreshToken.create(data);
     }
 
-
-    async findByToken(token){
-
-        return await RefreshToken.findOne({
-            token
-        });
-
+    /** Atomically find-and-delete, so a refresh token can only be used once (rotation). */
+    consumeByHash(tokenHash) {
+        return RefreshToken.findOneAndDelete({ tokenHash });
     }
 
-
-    async deleteByToken(token){
-
-        return await RefreshToken.deleteOne({
-            token
-        });
-
+    deleteByHash(tokenHash) {
+        return RefreshToken.deleteOne({ tokenHash });
     }
 
-
-    async deleteByUserId(userId){
-
-        return await RefreshToken.deleteMany({
-            userId
-        });
-
+    deleteByUserId(userId) {
+        return RefreshToken.deleteMany({ userId });
     }
-
-
 }
 
-
 export default new RefreshTokenRepository();
-

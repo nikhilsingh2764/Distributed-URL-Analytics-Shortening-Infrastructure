@@ -1,114 +1,73 @@
-import URL from "../../model/urlModel/url.model.js";
+import mongoose from "mongoose";
+import Url from "../../model/urlModel/url.model.js";
+
+const toObjectId = (id) => new mongoose.Types.ObjectId(String(id));
 
 class UrlRepository {
-
-    async create(data) {
-        return await URL.create(data);
+    create(data) {
+        return Url.create(data);
     }
 
-    async findById(id) {
-        return await URL.findById(id);
+    findByShortCode(shortCode) {
+        return Url.findOne({ shortCode });
     }
 
-    async findByIdAndUserId(id, userId) {
-        return await Url.findOne({
-            _id: id,
-            userId
+    findByIdAndUserId(id, userId) {
+        return Url.findOne({ _id: id, userId });
+    }
+
+    findAllByUserId(filter, { skip = 0, limit = 10, sort = { createdAt: -1 } } = {}) {
+        return Url.find(filter).sort(sort).skip(skip).limit(limit);
+    }
+
+    count(filter) {
+        return Url.countDocuments(filter);
+    }
+
+    updateByIdAndUserId(id, userId, update) {
+        return Url.findOneAndUpdate({ _id: id, userId }, update, {
+            returnDocument: "after",
+            runValidators: true,
         });
     }
 
-    async findByShortCode(shortCode) {
-        return await Url.findOne({ shortCode });
+    deleteByIdAndUserId(id, userId) {
+        return Url.findOneAndDelete({ _id: id, userId });
     }
 
-    async findByShortCodeAndUserId(shortCode, userId) {
-        return await Url.findOne({
-            shortCode,
-            userId
-        })
+    findIdsAndCodesByUserId(userId) {
+        return Url.find({ userId }).select("_id shortCode").lean();
     }
 
-    async findAllByUserId(userId, filter = {}, options = {}) {
-
-        const {
-            skip = 0,
-            limit = 10,
-            sort = { createdAt: -1 }
-        } = options;
-
-        return await Url.find({
-            userId,
-            ...filter
-        })
-            .sort(sort)
-            .skip(skip)
-            .limit(limit)
-
+    deleteAllByUserId(userId) {
+        return Url.deleteMany({ userId });
     }
 
-    async countByUserId(userId, filter = {}) {
-        return await Url.countDocuments({
-            userId,
-            ...filter
-        })
+    findTopByUserId(userId, limit = 5) {
+        return Url.find({ userId }).sort({ clicks: -1, createdAt: -1 }).limit(limit);
     }
 
-
-    async updateByIdAndUserId(id, userId, data) {
-        return await Url.findOneAndUpdate(
+    async totalsByUserId(userId, now = new Date()) {
+        const never = new Date("9999-12-31T00:00:00Z");
+        const [row] = await Url.aggregate([
+            { $match: { userId: toObjectId(userId) } },
             {
-                _id: id,
-                userId
+                $group: {
+                    _id: null,
+                    totalLinks: { $sum: 1 },
+                    totalClicks: { $sum: "$clicks" },
+                    expiredLinks: {
+                        $sum: { $cond: [{ $lte: [{ $ifNull: ["$expiresAt", never] }, now] }, 1, 0] },
+                    },
+                },
             },
-            data,
-            {
-                new: true,
-                runValidators: true
-            }
-        );
+        ]);
+        return row || { totalLinks: 0, totalClicks: 0, expiredLinks: 0 };
     }
 
-
-    async deleteByIdAndUserId(id, userId) {
-        return await Url.findOneAndDelete({
-            _id: id,
-            userId
-        });
+    recordClick(id, at) {
+        return Url.updateOne({ _id: id }, { $inc: { clicks: 1 }, $set: { lastClickedAt: at } });
     }
-
-
-    async incrementClicks(id) {
-        return await Url.findByIdAndUpdate(
-            id,
-            {
-                $inc: {
-                    clicks: 1
-                }
-            },
-            {
-                new: true
-            }
-        );
-    }
-
-
-    async findExpiredUrls() {
-        return await Url.find({
-            expiresAt: {
-                $lte: new Date()
-            }
-        });
-    }
-
-
-    async deleteExpiredUrls() {
-        return await Url.deleteMany({
-            expiresAt: {
-                $lte: new Date()
-            }
-        });
-    }
-
 }
 
 export default new UrlRepository();

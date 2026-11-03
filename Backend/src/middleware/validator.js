@@ -1,20 +1,13 @@
 import { validationResult } from "express-validator";
-import APiError from "../utils/ApiError.js";
-import logger from "../config/logger.js";
+import ApiError from "../utils/ApiError.js";
 
-const validate = (req, res, next) => {
+/** Turns express-validator results into a 400 with a compact `errors` array. */
+const validate = (req, _res, next) => {
+    const result = validationResult(req);
+    if (result.isEmpty()) return next();
 
-    const errors = validationResult(req);
-    logger.info(errors.array());
-
-    if (!errors.isEmpty()) {
-
-        throw new APiError(400, "validation failed", errors.array());
-
-    }
-
-    next();
-
+    const errors = result.array().map((e) => ({ field: e.path, message: e.msg }));
+    next(new ApiError(400, "validation_failed", errors));
 };
 
 export default validate;

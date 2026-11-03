@@ -1,69 +1,60 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import api from '../services/api';
+import { useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import AuthShell from "../components/AuthShell";
+import Button from "../components/ui/Button";
+import Field from "../components/ui/Field";
+import PasswordField from "../components/ui/PasswordField";
+import { FormError } from "../components/ui/Misc";
+import { getErrorMessage, getFieldErrors } from "../lib/api";
+import { isStrongPassword } from "../lib/utils";
+import { authService } from "../services/auth";
 
 export default function Register() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [error, setError] = useState('');
   const navigate = useNavigate();
+  const [form, setForm] = useState({ username: "", email: "", password: "" });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setError("");
+
+    const local: Record<string, string> = {};
+    if (!/^[A-Za-z0-9_]{3,30}$/.test(form.username.trim())) local.username = "3–30 characters: letters, numbers and underscores.";
+    if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) local.email = "Enter a valid email address.";
+    if (!isStrongPassword(form.password)) local.password = "Password doesn't meet all the requirements below.";
+    setFieldErrors(local);
+    if (Object.keys(local).length) return;
+
+    setBusy(true);
     try {
-      await api.post('/auth/register', { name, email, password });
-      navigate('/login');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Registration failed');
+      const email = form.email.trim().toLowerCase();
+      await authService.signup({ username: form.username.trim(), email, password: form.password });
+      navigate("/verify-email", { state: { email } });
+    } catch (err) {
+      setFieldErrors(getFieldErrors(err));
+      setError(getErrorMessage(err));
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto mt-12 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-      <h2 className="text-2xl font-bold mb-6 text-slate-800">Create Account</h2>
-      {error && <div className="bg-red-50 text-red-600 p-3 rounded-md text-sm mb-4">{error}</div>}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-          />
-        </div>
-        <button
-          type="submit"
-          className="w-full bg-blue-600 text-white py-2 rounded-md font-medium hover:bg-blue-700 transition"
-        >
-          Register
-        </button>
+    <AuthShell
+      title="Create your account"
+      subtitle="We'll email you a 6-digit code to confirm your address."
+      footer={<>Already have an account? <Link to="/login" className="font-medium text-primary hover:underline">Sign in</Link></>}
+    >
+      <form onSubmit={onSubmit} className="space-y-4" noValidate>
+        <FormError message={Object.keys(fieldErrors).length ? "" : error} />
+        <Field label="Username" autoComplete="username" value={form.username} onChange={set("username")} error={fieldErrors.username} autoFocus />
+        <Field label="Email" type="email" autoComplete="email" value={form.email} onChange={set("email")} error={fieldErrors.email} />
+        <PasswordField label="Password" autoComplete="new-password" value={form.password} onChange={set("password")} error={fieldErrors.password} showRules />
+        <Button type="submit" loading={busy} className="w-full" size="lg">Send verification code</Button>
       </form>
-      <p className="text-sm text-slate-600 mt-4 text-center">
-        Already have an account? <Link to="/login" className="text-blue-600 font-medium">Login</Link>
-      </p>
-    </div>
+    </AuthShell>
   );
 }

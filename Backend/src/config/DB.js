@@ -2,24 +2,11 @@ import mongoose from "mongoose";
 import logger from "./logger.js";
 import env from "./env.js";
 
-
 const connectDB = async () => {
-
-
-    try {
-
-        const connection = await mongoose.connect(env.MongoDB_URL);
-        logger.info(`MongoDB connected Successfully: ${connection.connection.host}`);
-
-    } catch (error) {
-
-        logger.error(error,'MongoDB connected Failed');
-        throw error;
-        
-    }
-
-
-
+    mongoose.set("strictQuery", true);
+    const connection = await mongoose.connect(env.MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
+    logger.info(`MongoDB connected: ${connection.connection.host}/${connection.connection.name}`);
+    return connection;
 };
 
 export default connectDB;

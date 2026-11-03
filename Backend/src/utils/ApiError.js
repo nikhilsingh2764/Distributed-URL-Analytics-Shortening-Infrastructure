@@ -1,18 +1,15 @@
+/**
+ * Operational error with an HTTP status code.
+ * `message` should be an i18n key (e.g. "otp_invalid"); the error middleware translates it.
+ */
 class ApiError extends Error {
-
-    constructor(statuscode, message = "something went wrong", errors = []) {
-
+    constructor(statusCode, message = "server_error", errors = []) {
         super(message);
-        this.statuscode = statuscode;
-        this.message = message;
+        this.name = "ApiError";
+        this.statusCode = statusCode;
         this.errors = errors;
-
-        Error.captureStackTrace(this, this.constructor);  //saves a clean stack trace (where the error happened) in the current error object.
-
-
+        Error.captureStackTrace(this, this.constructor);
     }
-
-
 }
 
 export default ApiError;

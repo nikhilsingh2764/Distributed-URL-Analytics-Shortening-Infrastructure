@@ -1,15 +1,12 @@
-const resetPasswordTemplate = (otp) => {
-    return `
-        <h2>Password Reset OTP</h2>
+import { emailLayout, otpBox } from "./layout.js";
 
-        <p>Your OTP to reset your password is:</p>
-
-        <h1>${otp}</h1>
-
-        <p>This OTP is valid for 10 minutes.</p>
-
-        <p>If you didn't request a password reset, please ignore this email.</p>
-    `;
-};
+const resetPasswordTemplate = (otp, minutes = 10) =>
+    emailLayout(
+        "Reset your password",
+        `<h2 style="margin:0 0 12px;">Reset your password</h2>
+         <p>Enter this code to choose a new password:</p>
+         ${otpBox(otp)}
+         <p>The code expires in <strong>${minutes} minutes</strong>. If you didn't ask for this, your password is unchanged and you can ignore this email.</p>`
+    );
 
 export default resetPasswordTemplate;

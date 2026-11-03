@@ -1,200 +1,43 @@
 import { body } from "express-validator";
 
-// =====================================
-// Signup
-// =====================================
-
-export const signupValidator = [
-    body("username")
+const email = (field = "email") =>
+    body(field)
         .trim()
-        .notEmpty()
-        .withMessage("Username is required")
-        .isLength({ min: 3, max: 30 })
-        .withMessage("Username must be between 3 and 30 characters")
-        .matches(/^[A-Za-z0-9_]+$/)
-        .withMessage(
-            "Username can only contain letters, numbers, and underscores"
-        ),
+        .notEmpty().withMessage("Email is required").bail()
+        .isEmail().withMessage("Invalid email address").bail()
+        .isLength({ max: 254 }).withMessage("Email is too long")
+        .customSanitizer((v) => v.toLowerCase());
 
-    body("email")
+const username = (field = "username") =>
+    body(field)
         .trim()
-        .notEmpty()
-        .withMessage("Email is required")
-        .isEmail()
-        .withMessage("Invalid email address")
-        .normalizeEmail(),
+        .isLength({ min: 3, max: 30 }).withMessage("Username must be between 3 and 30 characters")
+        .matches(/^[A-Za-z0-9_]+$/).withMessage("Username can only contain letters, numbers and underscores");
 
-    body("password")
-        .notEmpty()
-        .withMessage("Password is required")
-        .isLength({ min: 8 })
-        .withMessage("Password must have minimum 8 characters")
-        .matches(/[A-Z]/)
-        .withMessage("Password must contain one uppercase letter")
-        .matches(/[a-z]/)
-        .withMessage("Password must contain one lowercase letter")
-        .matches(/[0-9]/)
-        .withMessage("Password must contain one number")
-        .matches(/[@$!%*?&]/)
-        .withMessage("Password must contain one special character"),
-];
+/** 8–72 chars (bcrypt ignores everything past 72 bytes), upper, lower, digit and one symbol. */
+const strongPassword = (field) =>
+    body(field)
+        .isString().withMessage("Password is required").bail()
+        .isLength({ min: 8, max: 72 }).withMessage("Password must be 8–72 characters")
+        .matches(/[A-Z]/).withMessage("Password must contain an uppercase letter")
+        .matches(/[a-z]/).withMessage("Password must contain a lowercase letter")
+        .matches(/[0-9]/).withMessage("Password must contain a number")
+        .matches(/[^A-Za-z0-9]/).withMessage("Password must contain a special character");
 
-
-// =====================================
-// Verify OTP
-// =====================================
-
-export const verifyOtpValidator = [
-    body("email")
-        .trim()
-        .notEmpty()
-        .withMessage("Email is required")
-        .isEmail()
-        .withMessage("Invalid email format")
-        .normalizeEmail(),
-
+const otp = () =>
     body("otp")
         .trim()
-        .notEmpty()
-        .withMessage("OTP is required")
-        .isLength({ min: 6, max: 6 })
-        .withMessage("OTP must be 6 digits")
-        .isNumeric()
-        .withMessage("OTP must contain only numbers"),
-];
+        .matches(/^\d{6}$/).withMessage("OTP must be 6 digits");
 
-
-// =====================================
-// Login
-// =====================================
-
-export const loginValidator = [
-    body("email")
-        .trim()
-        .notEmpty()
-        .withMessage("Email is required")
-        .isEmail()
-        .withMessage("Invalid email format")
-        .normalizeEmail(),
-
-    body("password")
-        .notEmpty()
-        .withMessage("Password is required"),
-];
-
-
-// =====================================
-// Resend OTP
-// =====================================
-
-export const resendOtpValidator = [
-    body("email")
-        .trim()
-        .notEmpty()
-        .withMessage("Email is required")
-        .isEmail()
-        .withMessage("Invalid email format")
-        .normalizeEmail(),
-];
-
-
-// =====================================
-// Forgot Password
-// =====================================
-
-export const forgotPasswordValidator = [
-    body("email")
-        .trim()
-        .notEmpty()
-        .withMessage("Email is required")
-        .isEmail()
-        .withMessage("Invalid email format")
-        .normalizeEmail(),
-];
-
-
-// =====================================
-// Reset Password
-// =====================================
-
-export const resetPasswordValidator = [
-    body("email")
-        .trim()
-        .notEmpty()
-        .withMessage("Email is required")
-        .isEmail()
-        .withMessage("Invalid email format")
-        .normalizeEmail(),
-
-    body("otp")
-        .trim()
-        .notEmpty()
-        .withMessage("OTP is required")
-        .isLength({ min: 6, max: 6 })
-        .withMessage("OTP must be 6 digits")
-        .isNumeric()
-        .withMessage("OTP must contain only numbers"),
-
-    body("newPassword")
-        .notEmpty()
-        .withMessage("New password is required")
-        .isLength({ min: 8 })
-        .withMessage("Password must have minimum 8 characters")
-        .matches(/[A-Z]/)
-        .withMessage("Password must contain one uppercase letter")
-        .matches(/[a-z]/)
-        .withMessage("Password must contain one lowercase letter")
-        .matches(/[0-9]/)
-        .withMessage("Password must contain one number")
-        .matches(/[@$!%*?&]/)
-        .withMessage("Password must contain one special character"),
-];
-
-
-// =====================================
-// Change Password
-// =====================================
-
+export const signupValidator = [username(), email(), strongPassword("password")];
+export const verifyOtpValidator = [email(), otp()];
+export const resendOtpValidator = [email()];
+export const loginValidator = [email(), body("password").isString().notEmpty().withMessage("Password is required")];
+export const forgotPasswordValidator = [email()];
+export const resetPasswordValidator = [email(), otp(), strongPassword("newPassword")];
 export const changePasswordValidator = [
-    body("currentPassword")
-        .notEmpty()
-        .withMessage("Current password is required"),
-
-    body("newPassword")
-        .notEmpty()
-        .withMessage("New password is required")
-        .isLength({ min: 8 })
-        .withMessage("Password must have minimum 8 characters")
-        .matches(/[A-Z]/)
-        .withMessage("Password must contain one uppercase letter")
-        .matches(/[a-z]/)
-        .withMessage("Password must contain one lowercase letter")
-        .matches(/[0-9]/)
-        .withMessage("Password must contain one number")
-        .matches(/[@$!%*?&]/)
-        .withMessage("Password must contain one special character"),
+    body("currentPassword").isString().notEmpty().withMessage("Current password is required"),
+    strongPassword("newPassword"),
 ];
-
-
-// =====================================
-// Update Profile
-// =====================================
-
-export const updateProfileValidator = [
-    body("username")
-        .optional()
-        .trim()
-        .isLength({ min: 3, max: 30 })
-        .withMessage("Username must be between 3 and 30 characters")
-        .matches(/^[A-Za-z0-9_]+$/)
-        .withMessage(
-            "Username can only contain letters, numbers, and underscores"
-        ),
-
-    body("email")
-        .optional()
-        .trim()
-        .isEmail()
-        .withMessage("Invalid email address")
-        .normalizeEmail(),
-];
+export const updateProfileValidator = [username()];
+export const deleteAccountValidator = [body("password").isString().notEmpty().withMessage("Password is required")];

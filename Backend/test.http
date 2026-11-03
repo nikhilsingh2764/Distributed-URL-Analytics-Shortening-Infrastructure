@@ -1,10 +1,35 @@
-### Signup
+@host = http://localhost:5000/api/v1
 
-POST http://localhost:8000/api/v1/signup
+### 1. Sign up (OTP is emailed — or printed in the server log when SMTP_HOST is empty)
+POST {{host}}/auth/signup
 Content-Type: application/json
 
-{
-  "username": "nikhil",
-  "email": "nikhilsinghdfg@gmail.com",
-  "password": "Password@123"
-}
+{ "username": "demo_user", "email": "demo@example.com", "password": "Password@123" }
+
+### 2. Verify OTP
+POST {{host}}/auth/verify-otp
+Content-Type: application/json
+
+{ "email": "demo@example.com", "otp": "123456" }
+
+### 3. Login (stores cookies)
+# @name login
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{ "email": "demo@example.com", "password": "Password@123" }
+
+### 4. Create a short link
+POST {{host}}/urls
+Content-Type: application/json
+
+{ "originalUrl": "https://example.com/some/very/long/path", "customAlias": "demo-link" }
+
+### 5. List links
+GET {{host}}/urls?page=1&limit=10&status=active
+
+### 6. Dashboard summary
+GET {{host}}/urls/summary
+
+### 7. Public redirect
+GET http://localhost:5000/r/demo-link

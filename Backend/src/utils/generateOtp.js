@@ -1,7 +1,6 @@
-const generateOtp = () => {
+import crypto from "crypto";
 
-    return Math.floor(1000000 + Math.random()).toString();
-
-};
+/** Cryptographically secure 6-digit code (100000–999999). */
+const generateOtp = () => crypto.randomInt(100000, 1000000).toString();
 
 export default generateOtp;

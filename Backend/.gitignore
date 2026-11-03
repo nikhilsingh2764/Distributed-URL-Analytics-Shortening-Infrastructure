@@ -1,5 +1,4 @@
 node_modules/
-Backend/node_modules/
 .env
-dist/
-build/
+*.log
+coverage/

@@ -1,61 +1,57 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import api from '../services/api';
+import { useState, type FormEvent } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import AuthShell from "../components/AuthShell";
+import Button from "../components/ui/Button";
+import Field from "../components/ui/Field";
+import PasswordField from "../components/ui/PasswordField";
+import { FormError } from "../components/ui/Misc";
+import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
+import { getErrorMessage } from "../lib/api";
 
 export default function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
   const { login } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const state = location.state as { from?: string; email?: string; notice?: string } | null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const [email, setEmail] = useState(state?.email ?? "");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setError("");
+    setBusy(true);
     try {
-      const res = await api.post('/auth/login', { email, password });
-      login(res.data.token, res.data.user);
-      navigate('/');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Invalid email or password');
+      await login(email.trim(), password);
+      toast.success("Signed in.");
+      navigate(state?.from ?? "/dashboard", { replace: true });
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto mt-12 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-      <h2 className="text-2xl font-bold mb-6 text-slate-800">Sign In</h2>
-      {error && <div className="bg-red-50 text-red-600 p-3 rounded-md text-sm mb-4">{error}</div>}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-          />
+    <AuthShell
+      title="Welcome back"
+      subtitle="Sign in to manage your links."
+      footer={<>New to Trimly? <Link to="/register" className="font-medium text-primary hover:underline">Create an account</Link></>}
+    >
+      <form onSubmit={onSubmit} className="space-y-4" noValidate>
+        {state?.notice && <p role="status" className="rounded-lg bg-primary-soft px-3.5 py-2.5 text-sm text-primary">{state.notice}</p>}
+        <FormError message={error} />
+        <Field label="Email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus={!email} />
+        <PasswordField label="Password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <div className="flex justify-end">
+          <Link to="/forgot-password" state={{ email }} className="text-sm text-muted hover:text-ink hover:underline">Forgot password?</Link>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
-          />
-        </div>
-        <button
-          type="submit"
-          className="w-full bg-blue-600 text-white py-2 rounded-md font-medium hover:bg-blue-700 transition"
-        >
-          Login
-        </button>
+        <Button type="submit" loading={busy} className="w-full" size="lg">Sign in</Button>
       </form>
-      <p className="text-sm text-slate-600 mt-4 text-center">
-        Don't have an account? <Link to="/register" className="text-blue-600 font-medium">Register</Link>
-      </p>
-    </div>
+    </AuthShell>
   );
 }

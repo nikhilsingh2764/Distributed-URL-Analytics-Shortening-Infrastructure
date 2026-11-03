@@ -1,0 +1,823 @@
+openapi: 3.0.3
+info:
+  title: Trimly – URL Shortener & Analytics API
+  version: 2.0.0
+  description: |
+    REST API for a URL shortener with OTP-verified accounts, Redis-cached redirects,
+    background email delivery through Brevo (BullMQ) and per-link click analytics.
+
+    ### Authentication
+    Login sets two **HttpOnly cookies**: `accessToken` (15 min, sent on every request) and
+    `refreshToken` (7 days, sent only to `/api/v1/auth/*`). When the access token expires the API
+    answers `401` with message "Your session expired." — call `POST /auth/refresh-token`, then retry.
+    Refresh tokens are **single-use** and rotate on every refresh.
+
+    Non-browser clients may send `Authorization: Bearer <accessToken>` instead of the cookie.
+
+    ### Languages
+    Messages are localised. Send `Accept-Language: hi` for Hindi (default English).
+
+    ### Errors
+    Every error has the same shape (`ErrorResponse`). Validation errors include a per-field `errors` array.
+  contact:
+    name: Trimly
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:5000
+    description: Local development
+
+tags:
+  - name: Auth
+    description: Signup with email OTP, sessions, password management
+  - name: Account
+    description: Manage the signed-in user
+  - name: URLs
+    description: Create and manage short links
+  - name: Analytics
+    description: Click statistics
+  - name: Redirect
+    description: Public short-link redirect
+  - name: System
+    description: Health checks
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      description: Returns 200 when MongoDB and Redis are both reachable, otherwise 503.
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: Degraded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /api/v1/auth/signup:
+    post:
+      tags: [Auth]
+      summary: Start signup (sends an OTP email)
+      description: |
+        Stores the pending signup in Redis for 10 minutes and queues a 6-digit code by email.
+        The account is only created after `POST /auth/verify-otp`.
+        In development without a Brevo API key the code is printed in the server log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignupRequest" }
+      responses:
+        "201":
+          description: OTP sent
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          email: { type: string, format: email }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/verify-otp:
+    post:
+      tags: [Auth]
+      summary: Verify the email OTP and create the account
+      description: Max 5 wrong guesses per code; after that the pending signup is discarded.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OtpRequest" }
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "400":
+          description: Wrong or expired code, or validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/resend-otp:
+    post:
+      tags: [Auth]
+      summary: Send a fresh OTP for a pending signup
+      description: One request per 60 seconds per email.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: New OTP sent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessResponse" }
+        "400":
+          description: No pending signup (expired) or validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Sign in
+      description: Sets the `accessToken` and `refreshToken` HttpOnly cookies.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Signed in
+          headers:
+            Set-Cookie:
+              description: accessToken and refreshToken cookies
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401":
+          description: Wrong email or password
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "403":
+          description: Email not verified or account deactivated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/refresh-token:
+    post:
+      tags: [Auth]
+      summary: Rotate the session
+      description: |
+        Reads the `refreshToken` cookie, invalidates it and issues a new access + refresh pair.
+        Re-using an already-used refresh token revokes **all** of the user's sessions.
+      security:
+        - refreshCookie: []
+      responses:
+        "200":
+          description: Session refreshed (new cookies set)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessResponse" }
+        "401":
+          description: Missing, invalid or already-used refresh token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Sign out this device
+      description: Public on purpose, so it works even after the access token has expired.
+      responses:
+        "200":
+          description: Signed out; cookies cleared
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Email a password-reset OTP
+      description: Always returns the same response, whether or not the email is registered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Request accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessResponse" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Set a new password using the emailed OTP
+      description: Signs the user out everywhere.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetPasswordRequest" }
+      responses:
+        "200":
+          description: Password reset
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessResponse" }
+        "400":
+          description: Wrong/expired code or validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/profile:
+    get:
+      tags: [Account]
+      summary: Current user
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/update-profile:
+    patch:
+      tags: [Account]
+      summary: Change username
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username: { type: string, minLength: 3, maxLength: 30, pattern: "^[A-Za-z0-9_]+$" }
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/auth/change-password:
+    patch:
+      tags: [Account]
+      summary: Change password
+      description: Other devices are signed out; this one gets a fresh session.
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, format: password }
+                newPassword: { type: string, format: password, minLength: 8, maxLength: 72 }
+      responses:
+        "200":
+          description: Password changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessResponse" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/auth/deactivate-account:
+    patch:
+      tags: [Account]
+      summary: Deactivate the account
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Account deactivated, cookies cleared
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/auth/delete-account:
+    delete:
+      tags: [Account]
+      summary: Permanently delete the account and all its data
+      description: Deletes the user, every link, all click history and all sessions. Requires the password.
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Account deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessResponse" }
+        "400":
+          description: Wrong password or validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/urls:
+    post:
+      tags: [URLs]
+      summary: Create a short link
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUrlRequest" }
+      responses:
+        "201":
+          description: Link created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Url" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    get:
+      tags: [URLs]
+      summary: List my links
+      description: Paginated; supports search (destination or code), status filter and sorting.
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 10 } }
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: status, in: query, schema: { type: string, enum: [all, active, expired], default: all } }
+        - { name: sort, in: query, schema: { type: string, enum: [createdAt, clicks, expiresAt], default: createdAt } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        "200":
+          description: A page of links
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          urls:
+                            type: array
+                            items: { $ref: "#/components/schemas/Url" }
+                          pagination: { $ref: "#/components/schemas/Pagination" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/urls/summary:
+    get:
+      tags: [Analytics]
+      summary: Dashboard summary across all my links
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Totals, 14-day clicks series and top links
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Summary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/v1/urls/{id}:
+    parameters:
+      - $ref: "#/components/parameters/UrlId"
+    get:
+      tags: [URLs]
+      summary: Get one link
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The link
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Url" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [URLs]
+      summary: Update destination and/or expiry
+      description: 'Send `expiresAt: null` to remove the expiry. The redirect cache is invalidated immediately.'
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                originalUrl: { type: string, format: uri, maxLength: 2048 }
+                expiresAt: { type: string, format: date-time, nullable: true }
+      responses:
+        "200":
+          description: Updated link
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Url" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [URLs]
+      summary: Delete a link and its click history
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SuccessResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/urls/{id}/analytics:
+    parameters:
+      - $ref: "#/components/parameters/UrlId"
+    get:
+      tags: [Analytics]
+      summary: Click analytics for one link
+      description: |
+        Defaults to the last 30 days. Range is capped at 366 days.
+        Bots/crawlers are not counted. Country comes from CDN headers (Cloudflare, Vercel, CloudFront) and is
+        `Unknown` otherwise. Unique visitors are counted from a keyed hash of IP + user-agent (raw IPs are never stored).
+      security:
+        - accessCookie: []
+        - bearerAuth: []
+      parameters:
+        - { name: startDate, in: query, schema: { type: string, format: date-time } }
+        - { name: endDate, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: Analytics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Analytics" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /r/{shortCode}:
+    get:
+      tags: [Redirect]
+      summary: Follow a short link
+      description: |
+        Public. Served from Redis when cached (1 hour), otherwise from MongoDB.
+        Records a click asynchronously through a BullMQ queue so the redirect stays fast.
+      parameters:
+        - name: shortCode
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[A-Za-z0-9_-]{3,32}$" }
+      responses:
+        "302":
+          description: Redirect to the original URL
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: The link has expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+components:
+  securitySchemes:
+    accessCookie:
+      type: apiKey
+      in: cookie
+      name: accessToken
+      description: Set automatically by `POST /auth/login`.
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refreshToken
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Alternative for non-browser clients.
+
+  parameters:
+    UrlId:
+      name: id
+      in: path
+      required: true
+      description: MongoDB ObjectId of the link
+      schema: { type: string, pattern: "^[a-f0-9]{24}$", example: 665f1b2e8a1c4d0012ab34cd }
+
+  responses:
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            success: false
+            statusCode: 400
+            message: Some fields need attention.
+            errors:
+              - { field: email, message: Invalid email address }
+    Unauthorized:
+      description: Missing, invalid or expired access token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    Conflict:
+      description: Value already in use
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    TooManyRequests:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        statusCode: { type: integer, example: 200 }
+        message: { type: string }
+        data: { nullable: true }
+    ErrorResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        statusCode: { type: integer, example: 400 }
+        message: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+    Health:
+      type: object
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        mongo: { type: string, enum: [up, down] }
+        redis: { type: string, enum: [up, down] }
+        uptime: { type: integer, description: Seconds }
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        username: { type: string }
+        email: { type: string, format: email }
+        isVerified: { type: boolean }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    SignupRequest:
+      type: object
+      required: [username, email, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 30, pattern: "^[A-Za-z0-9_]+$", example: nikhil_dev }
+        email: { type: string, format: email, example: nikhil@example.com }
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 72
+          description: Needs an uppercase letter, a lowercase letter, a number and a special character.
+          example: Password@123
+    OtpRequest:
+      type: object
+      required: [email, otp]
+      properties:
+        email: { type: string, format: email }
+        otp: { type: string, pattern: "^\\d{6}$", example: "482913" }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+    ResetPasswordRequest:
+      type: object
+      required: [email, otp, newPassword]
+      properties:
+        email: { type: string, format: email }
+        otp: { type: string, pattern: "^\\d{6}$" }
+        newPassword: { type: string, format: password, minLength: 8, maxLength: 72 }
+    CreateUrlRequest:
+      type: object
+      required: [originalUrl]
+      properties:
+        originalUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: Must start with http:// or https://
+          example: https://example.com/a/very/long/path?utm_source=newsletter
+        customAlias:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{3,32}$"
+          description: Optional vanity code. Reserved words (api, r, docs, ...) are rejected.
+          example: spring-sale
+        expiresAt:
+          type: string
+          format: date-time
+          description: Must be in the future. Expired links answer 410.
+    Url:
+      type: object
+      properties:
+        id: { type: string }
+        originalUrl: { type: string, format: uri }
+        shortCode: { type: string, example: aB3xK9q }
+        shortUrl: { type: string, format: uri, example: "http://localhost:5000/r/aB3xK9q" }
+        clicks: { type: integer }
+        lastClickedAt: { type: string, format: date-time, nullable: true }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        isExpired: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+    DailyPoint:
+      type: object
+      properties:
+        date: { type: string, format: date, example: "2026-11-02" }
+        clicks: { type: integer }
+    LabelCount:
+      type: object
+      properties:
+        label: { type: string, example: Chrome }
+        count: { type: integer }
+    Summary:
+      type: object
+      properties:
+        totalLinks: { type: integer }
+        activeLinks: { type: integer }
+        expiredLinks: { type: integer }
+        totalClicks: { type: integer }
+        clicksLast14Days: { type: integer }
+        daily:
+          type: array
+          items: { $ref: "#/components/schemas/DailyPoint" }
+        topLinks:
+          type: array
+          items: { $ref: "#/components/schemas/Url" }
+    Analytics:
+      type: object
+      properties:
+        url: { $ref: "#/components/schemas/Url" }
+        range:
+          type: object
+          properties:
+            startDate: { type: string, format: date-time }
+            endDate: { type: string, format: date-time }
+        totals:
+          type: object
+          properties:
+            allTime: { type: integer }
+            inRange: { type: integer }
+            uniqueVisitors: { type: integer }
+            today: { type: integer }
+        daily:
+          type: array
+          items: { $ref: "#/components/schemas/DailyPoint" }
+        browsers: { type: array, items: { $ref: "#/components/schemas/LabelCount" } }
+        os: { type: array, items: { $ref: "#/components/schemas/LabelCount" } }
+        devices: { type: array, items: { $ref: "#/components/schemas/LabelCount" } }
+        countries: { type: array, items: { $ref: "#/components/schemas/LabelCount" } }
+        referrers: { type: array, items: { $ref: "#/components/schemas/LabelCount" } }
+        recent:
+          type: array
+          items:
+            type: object
+            properties:
+              browser: { type: string }
+              os: { type: string }
+              device: { type: string }
+              country: { type: string }
+              referrer: { type: string }
+              createdAt: { type: string, format: date-time }

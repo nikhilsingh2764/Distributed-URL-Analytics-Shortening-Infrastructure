@@ -1,20 +1,17 @@
 import { Queue } from "bullmq";
-import redis from "../config/redis.js";
+import { createBullConnection } from "../config/redis.js";
 
-const emailQueue = new Queue("emailQueue", {
-    connection: redis,
+export const EMAIL_QUEUE = "email";
+
+/** Jobs: "sendOtp" | "resetPasswordOtp" | "welcomeEmail" — consumed by worker/email.worker.js */
+const emailQueue = new Queue(EMAIL_QUEUE, {
+    connection: createBullConnection(),
+    defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5000 },
+        removeOnComplete: { age: 3600, count: 500 },
+        removeOnFail: { age: 7 * 24 * 3600, count: 1000 },
+    },
 });
 
 export default emailQueue;
-
-//created queue named emailQueue
-//in signup servce
-//await emailQueue.add("sendOTP", {
-//    email,
-//    otp,
-//});
-
-//It does not send the email.
-//It simply places a job into Redis.
-
-//The worker (next file) listens to this queue and actually sends the email.

@@ -1,234 +1,44 @@
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import { RedisStore } from "rate-limit-redis";
 import redis from "../config/redis.js";
-import {RedisStore} from "rate-limit-redis";
 import ApiError from "../utils/ApiError.js";
 
-
-
-//create store
-
-const createStore=(prefix) => new RedisStore({
-sendCommand: (...args)=>redis.call(...args),
-prefix
-});
-
-
-
-//login limiter
-
-export const loginLimiter= rateLimit({
-
-store:createStore("login:"),
-
-windowMs:15*60*1000,        //after 15 min it expire
-
-max:5,
-
-standardHeaders:true,
-
-skipSuccessfulRequests:true,
-
-legacyHeaders:false,
-
-  handler: (req,res,next) => {
-   return next(
-        new ApiError(429,req.t("rateLimiter.login.tooManyRequests"))
-    )
-   }
-
-});
-
-
-
-
-export const signupLimiter = rateLimit({
-    store:createStore("signup:"),
-
-    windowMs: 60*60*1000,
-
-    max:5,
-
-    standardHeaders:true,
-
-    legacyHeaders:false,
-
-    handler: (req,res,next) =>{
-        return next(
-            new ApiError(429,req.t("rateLimiter.signup.tooManyRequests"))
-        )
-    }
-
-});
-
-
-
-export const verifyOtpLimiter = rateLimit({
-
-    store:createStore("verifyOtp:"),
-
-    windowMs: 15*60*1000,
-
-    max:10,
-
-    standardHeaders:true,
-
-    legacyHeaders:false,
-
-    handler: (req,res,next) =>{
-        return next(
-            new ApiError(429,req.t("rateLimiter.verifyOtp.tooManyRequests"))
-        )
-    }
-
-});
-
-export const resendOtpLimiter = rateLimit({
-
-    store:createStore("resendotp:"),
-
-    windowMs: 15*60*1000,
-
-    max:3,
-
-    standardHeaders:true,
-
-    legacyHeaders:false,
-
-    handler: (req,res,next) =>{
-        return next(
-            new ApiError(429,req.t("rateLimiter.resendOtp.tooManyRequests"))
-        )
-    }
-
-});
-
-
-export const forgotPasswordLimiter = rateLimit({
-
-    store:createStore("forgotpassword:"),
-
-    windowMs: 15*60*1000,
-
-    max:5,
-
-    standardHeaders:true,
-
-    legacyHeaders:false,
-
-    handler: (req,res,next) =>{
-        return next(
-            new ApiError(429,req.t("rateLimiter.forgotPassword.tooManyRequests"))
-        )
-    }
-
-});
-
-
-export const resetPasswordLimiter = rateLimit({
-
-    store:createStore("resetpassword:"),
-
-    windowMs: 15*60*1000,
-
-    max:5,
-
-    standardHeaders:true,
-
-    legacyHeaders:false,
-
-    handler: (req,res,next) =>{
-        return next(
-            new ApiError(429,req.t("rateLimiter.resetPassword.tooManyRequests"))
-        )
-    }
-
-});
-
-
-export const refreshTokenLimiter = rateLimit({
-
-    store:createStore("refreshaccesstokenlimiter:"),
-
-    windowMs: 1*60*1000,
-
-    max:30,
-
-    standardHeaders:true,
-
-    legacyHeaders:false,
-
-    handler: (req,res,next) =>{
-        return next(
-            new ApiError(429,req.t("rateLimiter.refreshToken.tooManyRequests"))
-        )
-    }
-
-});
-
-
-
-
-
-export const logoutLimiter = rateLimit({
-
-    store:createStore("Logout:"),
-
-    windowMs: 5*60*1000,
-
-    max:20,
-
-    standardHeaders:true,
-
-    legacyHeaders:false,
-
-    handler: (req,res,next) =>{
-        return next(
-            new ApiError(429,req.t("rateLimiter.logout.tooManyRequests"))
-        )
-    }
-
-});
-
-
-export const changePasswordLimiter = rateLimit({
-
-    store:createStore("changepassword:"),
-
-    windowMs: 60*60*1000,
-
-    max:5,
-
-    standardHeaders:true,
-
-    legacyHeaders:false,
-
-    handler: (req,res,next) =>{
-        return next(
-            new ApiError(429,req.t("rateLimiter.changePassword.tooManyRequests"))
-        )
-    }
-
-});
-
-
-
-
-
-export const createUrlLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 20,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: "Too many URL creation requests"
-});
-
-
-
-export const redirectLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000,
-    max: 100,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: "Too many requests"
-});
-
+const MINUTE = 60 * 1000;
+
+/**
+ * Every limiter shares Redis, so limits hold across multiple API instances.
+ * `byUser` keys by the logged-in user (falls back to IP) — put authMiddleware BEFORE such a limiter.
+ */
+const createLimiter = ({ prefix, windowMs, limit, messageKey, byUser = false, skipSuccessfulRequests = false, failOpen = false }) =>
+    rateLimit({
+        store: new RedisStore({
+            sendCommand: (...args) => redis.call(...args),
+            prefix: `rl:${prefix}:`,
+        }),
+        windowMs,
+        limit,
+        standardHeaders: true,
+        legacyHeaders: false,
+        skipSuccessfulRequests,
+        passOnStoreError: failOpen,
+        keyGenerator: (req) =>
+            byUser && req.user ? `u:${req.user._id}` : ipKeyGenerator(req.ip),
+        handler: (_req, _res, next) => next(new ApiError(429, messageKey)),
+    });
+
+// ───────── auth ─────────
+export const signupLimiter = createLimiter({ prefix: "signup", windowMs: 60 * MINUTE, limit: 10, messageKey: "rl_signup" });
+export const verifyOtpLimiter = createLimiter({ prefix: "verify-otp", windowMs: 15 * MINUTE, limit: 10, messageKey: "rl_verify_otp" });
+export const resendOtpLimiter = createLimiter({ prefix: "resend-otp", windowMs: 15 * MINUTE, limit: 5, messageKey: "rl_resend_otp" });
+export const loginLimiter = createLimiter({ prefix: "login", windowMs: 15 * MINUTE, limit: 10, messageKey: "rl_login", skipSuccessfulRequests: true });
+export const forgotPasswordLimiter = createLimiter({ prefix: "forgot", windowMs: 15 * MINUTE, limit: 5, messageKey: "rl_forgot_password" });
+export const resetPasswordLimiter = createLimiter({ prefix: "reset", windowMs: 15 * MINUTE, limit: 10, messageKey: "rl_reset_password" });
+export const refreshTokenLimiter = createLimiter({ prefix: "refresh", windowMs: MINUTE, limit: 30, messageKey: "rl_refresh" });
+export const logoutLimiter = createLimiter({ prefix: "logout", windowMs: 5 * MINUTE, limit: 30, messageKey: "rl_logout" });
+export const changePasswordLimiter = createLimiter({ prefix: "change-password", windowMs: 60 * MINUTE, limit: 5, messageKey: "rl_change_password", byUser: true });
+export const sensitiveActionLimiter = createLimiter({ prefix: "sensitive", windowMs: 15 * MINUTE, limit: 5, messageKey: "rl_general", byUser: true });
+
+// ───────── urls ─────────
+export const createUrlLimiter = createLimiter({ prefix: "create-url", windowMs: 15 * MINUTE, limit: 60, messageKey: "rl_create_url", byUser: true });
+// Public hot path: if Redis is unavailable, let visitors through instead of breaking every short link.
+export const redirectLimiter = createLimiter({ prefix: "redirect", windowMs: MINUTE, limit: 120, messageKey: "rl_redirect", failOpen: true });
