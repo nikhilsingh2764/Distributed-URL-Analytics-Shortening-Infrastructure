@@ -1,5 +1,6 @@
 import { customAlphabet } from "nanoid";
 import ApiError from "../../utils/ApiError.js";
+import logger from "../../config/logger.js";
 import { baseUrl } from "../../config/env.js";
 import { cacheDel, cacheGet, cacheSet } from "../../utils/cache.js";
 import { escapeRegex } from "../../utils/escapeHtml.js";
@@ -53,6 +54,11 @@ export const createUrlService = async (userId, { originalUrl, expiresAt, customA
             return toUrlDto(url);
         } catch (error) {
             if (error.code !== 11000) throw error;
+            // Only a collision on shortCode is worth retrying; anything else is a real problem.
+            if (!error.keyPattern?.shortCode) {
+                logger.error({ err: error, keyPattern: error.keyPattern }, "duplicate key on unexpected index");
+                throw error;
+            }
             if (customAlias) throw new ApiError(409, "alias_taken");
         }
     }
